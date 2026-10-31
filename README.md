@@ -70,6 +70,17 @@ To go back further than the portal's two years, download older "daily usage" `.x
 3. Run the `atmos_energy.populate_past_usage` action, typing the absolute or config-relative path to the file (e.g., `www/january_usage.xls`) into the `file_path` field. Run it for your files in **chronological order** (oldest first, newest last). If you track more than one account, also pick the account in the `config_entry` field.
 4. Run the `atmos_energy.refresh_current_usage` action to re-import the portal's two years on top.
 
+### Rates by Bill Period (Daily modes)
+Rates change: the gas cost every month, other charges now and then. In **Configure** (Daily or Daily Advanced), after the mode you pick the date the rates take effect, then enter them:
+1. **Effective from** defaults to the first day of your latest billed period, the "From" date under Date of Service on the bill you just received.
+2. The rates form starts with whatever was in effect on that date; usually only the Gas Cost Charge changes.
+
+Each set applies from its date until the next later one, so you can enter past bills too, in any order, and correct one without touching the others. Rates entered before this feature (with no date) cover everything before your first dated set.
+
+On the next update the portal's billing periods from that date on are downloaded again and every day's cost is recalculated with its own bill's rates, writing over what was there. A day's share of the customer charge is spread over its bill period's actual length, so each billed period's daily costs add up to the bill (within a cent or two of line-item rounding). The open current period uses 30 days until it's billed.
+
+For Louisiana, Atmos publishes every month's gas cost (PGA) for the last 25 months in the "Louisiana PGA Rates" document under [Louisiana Gas Rates and Tariffs](https://www.atmosenergy.com/utility-operationsrates/tariffs-louisiana/); a bill uses the rate for its billing month (e.g. the October 2026 bill, for 9/4–10/5 service, uses Oct-26).
+
 ### How to configure the Energy Dashboard:
 1. Go to **Settings > Dashboards > Energy**.
 2. Under **Gas Consumption**, click **Add Gas Source**.

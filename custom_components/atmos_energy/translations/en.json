@@ -88,7 +88,7 @@
             },
             "cost": {
                 "title": "Rates & Surcharges",
-                "description": "Enter the rates from your latest Atmos Energy bill; daily costs are calculated from them. Defaults are Mid-Tex (Texas) rates. Other regions, e.g. Louisiana: Customer Charge = Monthly Customer Charge; Consumption rate = Consumption Charge plus any per-CCF riders such as Energy Efficiency; GCR rate = Gas Cost Charge (it changes monthly); Uri surcharge = 0 if your bill has none; Taxes & Fees = your franchise fee or tax percentage.",
+                "description": "Rates from the bill whose service starts {effective_from}. The form starts with the rates in effect on that date. For bills outside Mid-Tex, e.g. Louisiana: Customer Charge = Monthly Customer Charge; Consumption rate = Consumption Charge plus any per-CCF riders such as Energy Efficiency; GCR rate = Gas Cost Charge; Uri surcharge = 0 if your bill has none; Taxes & Fees = your franchise fee or tax percentage.",
                 "data": {
                     "fixed_cost": "Customer Charge ($)",
                     "usage_rate": "Consumption rate incl. per-CCF riders ($/CCF)",
@@ -103,6 +103,13 @@
                 "description": "Update the weather entity used for forecasting.",
                 "data": {
                     "weather_entity": "Weather Entity"
+                }
+            },
+            "rates_date": {
+                "title": "Rates: effective date",
+                "description": "Pick the first day the rates you're about to enter apply to: normally the 'From' date of the bill's Date of Service. They apply until the next later set, and daily costs from that date on are recalculated on the next update (the portal's billing periods from then on are downloaded again).\n\nRates entered so far:\n{rates}",
+                "data": {
+                    "effective_from": "Effective from"
                 }
             }
         },

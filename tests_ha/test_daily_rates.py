@@ -50,13 +50,18 @@ async def test_options_in_daily_mode_edit_rates(hass, flow_client, no_setup):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], DAILY)
+    assert result["step_id"] == "rates_date"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"effective_from": "2026-09-04"})
     assert result["step_id"] == "cost"
     defaults = {key.schema: key.default() for key in result["data_schema"].schema}
     assert defaults["gcr_rate"] == 0.48771
 
     result = await hass.config_entries.options.async_configure(result["flow_id"], LOUISIANA)
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options == LOUISIANA
+    # The rates apply from 9/4 on; the original set still covers earlier history
+    assert entry.options["gcr_rate"] == 0.48771
+    assert entry.options["rate_schedule"] == [{"effective_from": "2026-09-04", **LOUISIANA}]
+    assert entry.options["recalculate_from"] == "2026-09-04"
 
 
 async def test_options_in_monthly_mode_keep_stored_rates(hass, flow_client, no_setup):

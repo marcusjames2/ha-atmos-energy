@@ -3,7 +3,7 @@ import logging
 import math
 import asyncio
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -33,6 +33,11 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_AUTO_FETCH_GCR,
     CONF_GCR_RATE,
+    CONF_FIXED_COST,
+    CONF_USAGE_RATE,
+    CONF_URI_SURCHARGE,
+    CONF_TAX_PERCENT,
+    CONF_RECALCULATE_FROM,
     STORAGE_KEY,
     STORAGE_VERSION,
     CONF_ACCOUNT_NUMBER,
@@ -49,6 +54,7 @@ from .const import (
     MODE_DAILY_ADVANCED
 )
 from .api import AtmosEnergyApiClient
+from .rates import RateSchedule
 from .exceptions import AuthenticationError, APIError, DataParseError, AccountSelectionError
 from .wna.calculator import WNACalculator
 from .wna.gcr_fetcher import GCRRateFetcher
@@ -59,6 +65,12 @@ _LOGGER = logging.getLogger(__name__)
 # day) is taken to be a meter reading the portal put in the consumption column.
 _METER_READ_MIN = 100.0
 _METER_READ_FACTOR = 20.0
+
+def _period_month(period: str) -> tuple[int, int]:
+    """(year, month) of a billing period label like "October,2026"."""
+    parsed = datetime.strptime(period.replace(" ", ""), "%B,%Y")
+    return parsed.year, parsed.month
+
 
 # Serializes the one-time move of the old shared history file, so only one entry claims it
 _LEGACY_STORE_LOCK = asyncio.Lock()
@@ -94,6 +106,10 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
         self.last_update: datetime | None = None
         # Set once every past billing period the portal offers has been imported
         self._backfill_done = False
+        # options[recalculate_from] value whose recalculation has been done,
+        # and the one this update is doing
+        self._recalculated_from: str | None = None
+        self._recalculating_from: str | None = None
         super().__init__(
             hass,
             _LOGGER,
@@ -141,6 +157,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             if stored:
                 self._history = stored.get("history", {})
                 self._backfill_done = stored.get("backfill_done", False)
+                self._recalculated_from = stored.get("recalculated_from")
                 last_update_str = stored.get("last_update")
                 if last_update_str:
                     try:
@@ -167,7 +184,11 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
                 if key in self._history:
                     history[key] = self._history[key]
             
-            payload = {"history": history, "backfill_done": self._backfill_done}
+            payload = {
+                "history": history,
+                "backfill_done": self._backfill_done,
+                "recalculated_from": self._recalculated_from,
+            }
             if self.last_update:
                 payload["last_update"] = self.last_update.isoformat()
             
@@ -404,7 +425,14 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
         except Exception as e:
             _LOGGER.debug("Could not determine predecessor cost sum for %s: %s", cost_statistic_id, e)
 
-        # Build cost StatisticData list.
+        # Build cost StatisticData list. A day's fixed-charge share depends on
+        # how many days its bill period has; days of the open current period
+        # (no billing month yet) use 30 until they're re-imported once billed.
+        period_days: dict[str, int] = {}
+        for record in sorted_history:
+            month = record.get("billing_month")
+            if month:
+                period_days[month] = period_days.get(month, 0) + 1
         cost_statistics = []
         for record in sorted_history:
             dt = record["_dt"]
@@ -413,7 +441,11 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
                 continue
             try:
                 usage_val = float(usage)
-                daily_cost = self._calculate_daily_cost_for_date(usage_val)
+                daily_cost = self._calculate_daily_cost_for_date(
+                    usage_val,
+                    dt.date(),
+                    period_days.get(record.get("billing_month"), 30),
+                )
                 cost_cumulative_sum += daily_cost
                 timestamp_utc = dt_util.as_utc(dt)
                 cost_statistics.append(StatisticData(
@@ -834,32 +866,42 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Could not parse next meter read date: %s", date_str)
         return None
 
-    def _calculate_daily_cost_for_date(self, usage: float) -> float:
+    def _calculate_daily_cost_for_date(
+        self, usage: float, day: date | None = None, period_days: float = 30.0
+    ) -> float:
         """Calculate the accurate cost for a single day's usage.
 
-        Reuses calculate_total_cost with pro_rate_days=1 to correctly
-        pro-rate the fixed monthly charge for one day, while applying
-        full WNA, GCR, URI and tax on the variable portion.
+        Reuses calculate_total_cost with pro_rate_days=1 to pro-rate the fixed
+        monthly charge for one day of a `period_days`-day bill period, while
+        applying full WNA, GCR, URI and tax on the variable portion, at the
+        rates in effect on `day`.
 
         Args:
             usage: Daily gas usage in CCF.
+            day: The day, for picking its rates; today's rates if None.
+            period_days: Days in the day's bill period.
 
         Returns:
-            Cost in USD for that day's usage.
+            Cost in USD for that day's usage, unrounded so a period's days
+            add up to its bill.
         """
         result = self.calculate_total_cost(
             usage=usage,
             include_fixed=True,
             pro_rate_days=1,
+            on=day,
+            period_days=period_days,
         )
-        return result["total"]
+        return result["total_exact"]
 
     def calculate_total_cost(
         self, 
         usage: float, 
         include_fixed: bool = True, 
         wna_charge: float | None = None,
-        pro_rate_days: int | None = None
+        pro_rate_days: int | None = None,
+        on: date | None = None,
+        period_days: float = 30.0,
     ) -> dict[str, Any]:
         """Calculate total cost with all components.
         
@@ -868,21 +910,23 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             include_fixed: Include fixed charge
             wna_charge: Pre-calculated WNA charge (if None, will calculate)
             pro_rate_days: If set, pro-rate fixed charge for this many days
-        
+            on: Use the rates in effect on this day (default: today)
+            period_days: Bill period length the fixed charge is pro-rated over
+                
         Returns:
             Dict with 'total' and 'breakdown' keys
         """
-        options = self.config_entry.options
-        
+        rates = RateSchedule.from_options(self.config_entry.options).at(on or dt_util.now().date())
+
         # Fixed charge
-        fixed = float(options.get("fixed_cost", 24.40)) if include_fixed else 0.0
-        
+        fixed = rates[CONF_FIXED_COST] if include_fixed else 0.0
+
         # Pro-rate fixed charge if requested
         if pro_rate_days is not None and include_fixed:
-            fixed = fixed * (pro_rate_days / 30.0)
-        
+            fixed = fixed * (pro_rate_days / period_days)
+
         # Consumption charge
-        consumption_rate = float(options.get("usage_rate", 0.78))
+        consumption_rate = rates[CONF_USAGE_RATE]
         consumption_charge = usage * consumption_rate
         
         # WNA charge
@@ -897,23 +941,24 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             wna_charge = usage * wna_factor
         
         # GCR charge
-        gcr_rate = float(self.current_gcr_rate or options.get("gcr_rate", 1.17))
+        gcr_rate = float(self.current_gcr_rate or rates[CONF_GCR_RATE])
         gcr_charge = usage * gcr_rate
         
         # URI surcharge
-        uri_rate = float(options.get("uri_surcharge", 0.018431))
+        uri_rate = rates[CONF_URI_SURCHARGE]
         uri_charge = usage * uri_rate
         
         # Subtotal before tax
         subtotal = fixed + consumption_charge + wna_charge + gcr_charge + uri_charge
         
         # Tax
-        tax_pct = float(options.get("tax_percent", 8.0))
+        tax_pct = rates[CONF_TAX_PERCENT]
         tax_amount = subtotal * (tax_pct / 100.0)
         total_cost = subtotal + tax_amount
         
         return {
             "total": round(total_cost, 2),
+            "total_exact": total_cost,
             "breakdown": {
                 "fixed_charge": round(fixed, 2),
                 "consumption_charge": round(consumption_charge, 2),
@@ -961,6 +1006,8 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
                 if any("reported_usage" in r and r.get("date") in current_dates for r in history):
                     data["usage"] = sum(r["usage"] for r in history if r.get("date") in current_dates)
                 await self._async_import_statistics_list(history)
+                if self._recalculating_from:
+                    self._recalculated_from, self._recalculating_from = self._recalculating_from, None
                 
                 # 2. Advanced Prediction Logic (Only MODE_DAILY_ADVANCED)
                 if mode == MODE_DAILY_ADVANCED:
@@ -1018,13 +1065,26 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
         """
         try:
             periods = await self.client.get_billing_periods()
-            wanted = periods if not self._backfill_done else periods[:1]
+            recalculate_from = self.pending_recalculation()
+            if not self._backfill_done:
+                wanted = periods
+            elif recalculate_from:
+                # Every period billed in or after the month rates changed, so
+                # each day from that date on is costed again at its bill's rates
+                wanted = [p for p in periods if _period_month(p) >= (recalculate_from.year, recalculate_from.month)]
+                wanted = wanted or periods[:1]
+            else:
+                wanted = periods[:1]
             # Oldest first, so a day in two periods keeps the newer period's value
             past = await self.client.get_daily_history(list(reversed(wanted)))
         except (APIError, DataParseError, aiohttp.ClientError, asyncio.TimeoutError) as err:
             _LOGGER.warning("Could not fetch past billing periods, importing the current one only: %s", err)
             return current
 
+        if periods and self.pending_recalculation():
+            # Marked done by _async_update_data once the import goes through
+            self._recalculating_from = self.config_entry.options.get(CONF_RECALCULATE_FROM)
+            _LOGGER.info("Recalculating costs from %s", self._recalculating_from)
         if periods and not self._backfill_done:
             self._backfill_done = True
             _LOGGER.info("Backfilled %d days from %d past billing periods", len(past), len(periods))
@@ -1072,6 +1132,27 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
                 )
                 repaired[i] = {**records[i], "usage": fill, "reported_usage": records[i]["usage"]}
         return repaired
+
+    def latest_bill_period_start(self) -> date | None:
+        """First day of the most recent billed period in the stored history."""
+        first: dict[str, datetime] = {}
+        last: dict[str, datetime] = {}
+        for record in self._history.values():
+            month = record.get("billing_month")
+            day = self._parse_date(record.get("date", ""))
+            if month and day:
+                first[month] = min(first.get(month, day), day)
+                last[month] = max(last.get(month, day), day)
+        if not last:
+            return None
+        return first[max(last, key=last.get)].date()
+
+    def pending_recalculation(self) -> date | None:
+        """The date costs must be recomputed from, if rates were saved since the last recalculation."""
+        value = self.config_entry.options.get(CONF_RECALCULATE_FROM)
+        if not value or value == self._recalculated_from:
+            return None
+        return date.fromisoformat(value)
 
     def _merge_history(self, records: list[dict]) -> list[dict]:
         """Drop repeated days, keeping each day's last record, in date order."""
@@ -1156,8 +1237,9 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             date_str = record.get("date")
             if date_str:
                 key = date_str.split(" ")[0]
-                # Also replace a stored day whose usage changed, e.g. a repaired meter-read day
-                if key not in self._history or self._history[key].get("usage") != record.get("usage"):
+                # Also replace a stored day that changed, e.g. a repaired meter-read
+                # day or one that gained its billing month
+                if self._history.get(key) != record:
                     self._history[key] = record
                     self._unsaved_keys.add(key)
                     updated = True
@@ -1208,7 +1290,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
         # If we have a last_update AND data, and it's AFTER the reference_time, 
         # then we've already updated for this cycle.
         backfill_pending = (
-            not self._backfill_done
+            (not self._backfill_done or self.pending_recalculation() is not None)
             and self.config_entry.data.get(CONF_OPERATION_MODE, MODE_DAILY_ADVANCED) != MODE_MONTHLY
         )
         if self.last_update and self.data and self.last_update >= reference_time and not backfill_pending:

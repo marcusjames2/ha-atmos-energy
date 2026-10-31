@@ -1,4 +1,5 @@
 """Config flow for Atmos Energy integration."""
+from datetime import date
 import logging
 from typing import Any
 import voluptuous as vol
@@ -21,11 +22,14 @@ from .const import (
     CONF_AUTO_FETCH_GCR,
     CONF_ACCOUNT_NUMBER,
     CONF_SERVICE_ADDRESS,
+    CONF_RATE_SCHEDULE,
+    CONF_RECALCULATE_FROM,
     MODE_MONTHLY,
     MODE_DAILY,
     MODE_DAILY_ADVANCED
 )
 from .api import AtmosEnergyApiClient
+from .rates import RATE_DEFAULTS, RateSchedule
 from .exceptions import AuthenticationError, APIError
 from .wna.ndd_data import WEATHER_STATION_CONFIG
 
@@ -70,6 +74,15 @@ def _cost_schema(options: dict[str, Any], advanced: bool) -> vol.Schema:
         ),
     })
     return vol.Schema(fields)
+
+
+def _describe_schedule(schedule: RateSchedule) -> str:
+    """One line per dated set of rates, for the date step's description."""
+    lines = [
+        f"- from {d.isoformat()}: gas cost {r.get(CONF_GCR_RATE, '?')}/CCF"
+        for d, r in schedule.dated
+    ]
+    return "\n".join(lines) or "- none yet (your original rates apply to all history)"
 
 
 def _configured_account_numbers(hass, exclude_entry_id: str | None = None) -> set[str]:
@@ -283,6 +296,7 @@ class AtmosEnergyOptionsFlowHandler(config_entries.OptionsFlow):
         self._options = dict(config_entry.options)
         self._data = dict(config_entry.data)
         self._accounts: list[dict[str, str]] = []
+        self._effective_from: date | None = None
 
     async def async_step_init(self, user_input=None):
         """Step 1: Credentials and Toggle."""
@@ -371,7 +385,7 @@ class AtmosEnergyOptionsFlowHandler(config_entries.OptionsFlow):
         if self._data[CONF_OPERATION_MODE] == MODE_DAILY_ADVANCED:
             return await self.async_step_weather_station()
         if self._data[CONF_OPERATION_MODE] == MODE_DAILY:
-            return await self.async_step_cost()
+            return await self.async_step_rates_date()
 
         # Keep the stored options; saving {} here would drop the rates
         return self.async_create_entry(title="", data=self._options)
@@ -380,31 +394,61 @@ class AtmosEnergyOptionsFlowHandler(config_entries.OptionsFlow):
         """Step 2: Region."""
         if user_input is not None:
             self._options.update(user_input)
-            return await self.async_step_cost()
-        
+            return await self.async_step_rates_date()
+
         stations = {id: info["name"] for id, info in WEATHER_STATION_CONFIG.items()}
         return self.async_show_form(
             step_id="weather_station",
             data_schema=vol.Schema({
                 vol.Required(
-                    CONF_WEATHER_STATION, 
+                    CONF_WEATHER_STATION,  
                     default=self._options.get(CONF_WEATHER_STATION, "austin")
                 ): vol.In(stations),
             }),
         )
 
-    async def async_step_cost(self, user_input=None):
-        """Step 3: Rates."""
-        advanced = self._data[CONF_OPERATION_MODE] == MODE_DAILY_ADVANCED
+    def _coordinator(self):
+        return self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+
+    async def async_step_rates_date(self, user_input=None):
+        """Step 3: The date the rates take effect."""
         if user_input is not None:
-            self._options.update(user_input)
+            self._effective_from = date.fromisoformat(user_input["effective_from"])
+            return await self.async_step_cost()
+
+        coordinator = self._coordinator()
+        default = (coordinator.latest_bill_period_start() if coordinator else None) or date.today()
+        return self.async_show_form(
+            step_id="rates_date",
+            data_schema=vol.Schema({
+                vol.Required("effective_from", default=default.isoformat()): selector.DateSelector(),
+            }),
+            description_placeholders={"rates": _describe_schedule(RateSchedule.from_options(self._options))},
+        )
+
+    async def async_step_cost(self, user_input=None):
+        """Step 4: Rates, from the effective date until the next later set."""
+        advanced = self._data[CONF_OPERATION_MODE] == MODE_DAILY_ADVANCED
+        schedule = RateSchedule.from_options(self._options)
+        if user_input is not None:
+            rates = {k: user_input.pop(k) for k in RATE_DEFAULTS if k in user_input}
+            self._options.update(user_input)  # e.g. auto_fetch_gcr
+            self._options[CONF_RATE_SCHEDULE] = schedule.with_rates(self._effective_from, rates).as_option()
+            recalculate_from = self._effective_from
+            coordinator = self._coordinator()
+            pending = coordinator.pending_recalculation() if coordinator else None
+            if pending:
+                recalculate_from = min(recalculate_from, pending)
+            self._options[CONF_RECALCULATE_FROM] = recalculate_from.isoformat()
             if advanced:
                 return await self.async_step_weather_forecast()
             return self.async_create_entry(title="", data=self._options)
 
+        current = {**self._options, **schedule.at(self._effective_from)}
         return self.async_show_form(
             step_id="cost",
-            data_schema=_cost_schema(self._options, advanced),
+            data_schema=_cost_schema(current, advanced),
+            description_placeholders={"effective_from": self._effective_from.isoformat()},
         )
 
     async def async_step_weather_forecast(self, user_input=None):
