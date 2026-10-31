@@ -153,6 +153,8 @@ An entry created before multi-account support, on a login with several accounts,
 With more than one entry, `atmos_energy.populate_past_usage` needs the `config_entry` field to say which account the spreadsheet belongs to, and `atmos_energy.refresh_current_usage` refreshes every account.
 
 ## 🔍 Troubleshooting
+- **Meter readings in daily data**: The portal's daily download occasionally puts the meter reading (thousands of CCF) in a day's consumption. A day above both 100 CCF and 20× the bill period's typical day is treated as one of these: it gets an equal share of what the period's billed usage (from the monthly download) leaves after its other days, and a warning is logged. The period is re-imported on the next update, which also corrects a spike already in the Energy dashboard.
+- **Rates outside Mid-Tex**: In Daily mode, enter your bill's rates under **Configure**. For example, an Atmos Louisiana bill maps as Customer Charge = Monthly Customer Charge, consumption rate = Consumption Charge + both Energy Efficiency riders, GCR = Gas Cost Charge (update it monthly), Uri surcharge = 0, Taxes & Fees = the franchise fee percentage.
 - **Frequency**: Data is fetched daily at 8 AM (aligned with Atmos's data refresh) to minimize portal load.
 - **Login Issues**: Ensure you can log in to [Atmos Energy](https://www.atmosenergy.com/) directly and have accepted any new Terms of Service.
 - **GCR Fetching**: If the integration cannot fetch the latest rate PDF, it will fall back to your manually entered GCR rate and log a warning.
