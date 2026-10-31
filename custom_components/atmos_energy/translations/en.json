@@ -33,7 +33,8 @@
                     "auto_fetch_gcr": "Auto-fetch current GCR rates",
                     "gcr_rate": "Gas cost (GCR) rate ($/CCF)",
                     "uri_surcharge": "Winter Storm Uri Surcharge ($/CCF)",
-                    "tax_percent": "Taxes & Fees Percentage (%)"
+                    "tax_percent": "Taxes & Fees Percentage (%)",
+                    "auto_fetch_la_pga": "Louisiana: use Atmos's published gas cost (PGA) for each bill month"
                 }
             },
             "weather_forecast": {
@@ -95,7 +96,8 @@
                     "auto_fetch_gcr": "Auto-fetch current GCR rates",
                     "gcr_rate": "Gas cost (GCR) rate ($/CCF)",
                     "uri_surcharge": "Winter Storm Uri Surcharge ($/CCF)",
-                    "tax_percent": "Taxes & Fees Percentage (%)"
+                    "tax_percent": "Taxes & Fees Percentage (%)",
+                    "auto_fetch_la_pga": "Louisiana: use Atmos's published gas cost (PGA) for each bill month"
                 }
             },
             "weather_forecast": {

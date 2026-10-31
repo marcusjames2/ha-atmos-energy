@@ -79,7 +79,7 @@ Each set applies from its date until the next later one, so you can enter past b
 
 On the next update the portal's billing periods from that date on are downloaded again and every day's cost is recalculated with its own bill's rates, writing over what was there. A day's share of the customer charge is spread over its bill period's actual length, so each billed period's daily costs add up to the bill (within a cent or two of line-item rounding). The open current period uses 30 days until it's billed.
 
-For Louisiana, Atmos publishes every month's gas cost (PGA) for the last 25 months in the "Louisiana PGA Rates" document under [Louisiana Gas Rates and Tariffs](https://www.atmosenergy.com/utility-operationsrates/tariffs-louisiana/); a bill uses the rate for its billing month (e.g. the October 2026 bill, for 9/4–10/5 service, uses Oct-26).
+**Louisiana gas cost, automatically:** turn on *Louisiana: use Atmos's published gas cost (PGA) for each bill month* in the rates form. Atmos publishes the residential gas cost for the last 25 months each month ("Louisiana PGA Rates" under [Louisiana Gas Rates and Tariffs](https://www.atmosenergy.com/utility-operationsrates/tariffs-louisiana/)). The integration fetches it at most once a day and keeps every month it has seen, and each billed day uses its bill month's rate: the October 2026 bill (9/4–10/5 service) uses Oct-26. Days not yet billed use the newest month; months older than the table use the gas cost you entered. Turning it on recalculates all history. After that, only enter rates when the customer charge, consumption charge, riders or franchise fee change.
 
 ### How to configure the Energy Dashboard:
 1. Go to **Settings > Dashboards > Energy**.

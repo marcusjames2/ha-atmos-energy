@@ -1,7 +1,7 @@
 {
   "domain": "atmos_energy",
   "name": "Atmos Energy",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "integration_type": "device",
   "documentation": "https://github.com/marcusjames2/ha-atmos-energy",
   "issue_tracker": "https://github.com/marcusjames2/ha-atmos-energy/issues",

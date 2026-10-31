@@ -24,6 +24,8 @@ CONF_URI_SURCHARGE = "uri_surcharge"
 CONF_AUTO_FETCH_GCR = "auto_fetch_gcr"
 # Dated rate sets: [{"effective_from": "YYYY-MM-DD", "fixed_cost": ..., ...}]
 CONF_RATE_SCHEDULE = "rate_schedule"
+# Use Atmos's published Louisiana PGA (gas cost) rate for each bill month
+CONF_AUTO_FETCH_LA_PGA = "auto_fetch_la_pga"
 # Earliest date whose daily cost must be recomputed after rates were saved
 CONF_RECALCULATE_FROM = "recalculate_from"
 

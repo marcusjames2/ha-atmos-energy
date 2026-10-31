@@ -38,6 +38,7 @@ from .const import (
     CONF_URI_SURCHARGE,
     CONF_TAX_PERCENT,
     CONF_RECALCULATE_FROM,
+    CONF_AUTO_FETCH_LA_PGA,
     STORAGE_KEY,
     STORAGE_VERSION,
     CONF_ACCOUNT_NUMBER,
@@ -54,6 +55,7 @@ from .const import (
     MODE_DAILY_ADVANCED
 )
 from .api import AtmosEnergyApiClient
+from .la_pga import LouisianaPGAFetcher
 from .rates import RateSchedule
 from .exceptions import AuthenticationError, APIError, DataParseError, AccountSelectionError
 from .wna.calculator import WNACalculator
@@ -92,6 +94,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
         # Initialize GCR fetcher
         self.gcr_fetcher = GCRRateFetcher(hass)
         self.current_gcr_rate = None
+        self.la_pga = LouisianaPGAFetcher(hass)
         
         # Persistent storage for history, one file per entry (each entry is one meter)
         self._store = Store(hass, STORAGE_VERSION, history_storage_key(entry.entry_id))
@@ -152,6 +155,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
 
             # Load GCR cache
             await self.gcr_fetcher.async_load()
+            await self.la_pga.async_load()
 
             stored = await self._store.async_load()
             if stored:
@@ -445,6 +449,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
                     usage_val,
                     dt.date(),
                     period_days.get(record.get("billing_month"), 30),
+                    record.get("billing_month"),
                 )
                 cost_cumulative_sum += daily_cost
                 timestamp_utc = dt_util.as_utc(dt)
@@ -867,7 +872,11 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
         return None
 
     def _calculate_daily_cost_for_date(
-        self, usage: float, day: date | None = None, period_days: float = 30.0
+        self,
+        usage: float,
+        day: date | None = None,
+        period_days: float = 30.0,
+        billing_month: str | None = None,
     ) -> float:
         """Calculate the accurate cost for a single day's usage.
 
@@ -880,6 +889,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             usage: Daily gas usage in CCF.
             day: The day, for picking its rates; today's rates if None.
             period_days: Days in the day's bill period.
+            billing_month: The day's bill month, e.g. "Oct 26", for the Louisiana PGA rate.
 
         Returns:
             Cost in USD for that day's usage, unrounded so a period's days
@@ -891,6 +901,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             pro_rate_days=1,
             on=day,
             period_days=period_days,
+            billing_month=billing_month,
         )
         return result["total_exact"]
 
@@ -902,6 +913,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
         pro_rate_days: int | None = None,
         on: date | None = None,
         period_days: float = 30.0,
+        billing_month: str | None = None,
     ) -> dict[str, Any]:
         """Calculate total cost with all components.
         
@@ -912,6 +924,7 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             pro_rate_days: If set, pro-rate fixed charge for this many days
             on: Use the rates in effect on this day (default: today)
             period_days: Bill period length the fixed charge is pro-rated over
+            billing_month: Bill month for the Louisiana PGA rate (default: the newest)
                 
         Returns:
             Dict with 'total' and 'breakdown' keys
@@ -941,7 +954,11 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             wna_charge = usage * wna_factor
         
         # GCR charge
-        gcr_rate = float(self.current_gcr_rate or rates[CONF_GCR_RATE])
+        gcr_rate = self.current_gcr_rate
+        if not gcr_rate and self.config_entry.options.get(CONF_AUTO_FETCH_LA_PGA):
+            # Months older than Atmos's table fall back to the entered rate
+            gcr_rate = self.la_pga.rate_for(billing_month)
+        gcr_rate = float(gcr_rate or rates[CONF_GCR_RATE])
         gcr_charge = usage * gcr_rate
         
         # URI surcharge
@@ -998,6 +1015,8 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
                 if mode == MODE_DAILY_ADVANCED:
                     # The fetched GCR is Mid-Tex's; other regions use the entered rate
                     await self._update_gcr_rate()
+                if self.config_entry.options.get(CONF_AUTO_FETCH_LA_PGA):
+                    await self.la_pga.async_refresh()
                 # Past billing periods go to statistics and the model only;
                 # data["history"] stays the current period.
                 history = await self._async_add_past_periods(data.get("history", []))

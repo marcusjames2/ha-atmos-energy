@@ -40,7 +40,7 @@ async def test_setup_in_daily_mode_asks_for_rates(hass, flow_client, no_setup):
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], LOUISIANA)
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["options"] == LOUISIANA
+    assert result["options"] == {**LOUISIANA, "auto_fetch_la_pga": False}
 
 
 async def test_options_in_daily_mode_edit_rates(hass, flow_client, no_setup):

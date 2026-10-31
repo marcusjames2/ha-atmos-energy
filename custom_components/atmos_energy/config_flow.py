@@ -23,6 +23,7 @@ from .const import (
     CONF_ACCOUNT_NUMBER,
     CONF_SERVICE_ADDRESS,
     CONF_RATE_SCHEDULE,
+    CONF_AUTO_FETCH_LA_PGA,
     CONF_RECALCULATE_FROM,
     MODE_MONTHLY,
     MODE_DAILY,
@@ -68,12 +69,17 @@ def _cost_schema(options: dict[str, Any], advanced: bool) -> vol.Schema:
         fields[vol.Required(CONF_AUTO_FETCH_GCR, default=options.get(CONF_AUTO_FETCH_GCR, True))] = bool
     fields.update({
         vol.Required(CONF_GCR_RATE, default=options.get(CONF_GCR_RATE, 1.16939)): rate,
+        vol.Required(CONF_AUTO_FETCH_LA_PGA, default=options.get(CONF_AUTO_FETCH_LA_PGA, False)): bool,
         vol.Required(CONF_URI_SURCHARGE, default=options.get(CONF_URI_SURCHARGE, 0.01843)): rate,
         vol.Required(CONF_TAX_PERCENT, default=options.get(CONF_TAX_PERCENT, 8.08)): vol.All(
             vol.Coerce(float), vol.Range(min=0, max=100)
         ),
     })
     return vol.Schema(fields)
+
+
+# A recalculation date before any portal history, so every billing period is recosted
+RECALCULATE_ALL = date(2000, 1, 1)
 
 
 def _describe_schedule(schedule: RateSchedule) -> str:
@@ -432,9 +438,13 @@ class AtmosEnergyOptionsFlowHandler(config_entries.OptionsFlow):
         schedule = RateSchedule.from_options(self._options)
         if user_input is not None:
             rates = {k: user_input.pop(k) for k in RATE_DEFAULTS if k in user_input}
+            pga_turned_on = user_input.get(CONF_AUTO_FETCH_LA_PGA) and not self._options.get(CONF_AUTO_FETCH_LA_PGA)
             self._options.update(user_input)  # e.g. auto_fetch_gcr
             self._options[CONF_RATE_SCHEDULE] = schedule.with_rates(self._effective_from, rates).as_option()
             recalculate_from = self._effective_from
+            if pga_turned_on:
+                # Atmos's table covers past bills too, so recost all history
+                recalculate_from = RECALCULATE_ALL
             coordinator = self._coordinator()
             pending = coordinator.pending_recalculation() if coordinator else None
             if pending:
