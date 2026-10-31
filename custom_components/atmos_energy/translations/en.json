@@ -26,12 +26,12 @@
             },
             "cost": {
                 "title": "Rates & Surcharges",
-                "description": "Configure your billing rates. These can usually be found on your latest Atmos Energy bill.",
+                "description": "Enter the rates from your latest Atmos Energy bill; daily costs are calculated from them. Defaults are Mid-Tex (Texas) rates. Other regions, e.g. Louisiana: Customer Charge = Monthly Customer Charge; Consumption rate = Consumption Charge plus any per-CCF riders such as Energy Efficiency; GCR rate = Gas Cost Charge (it changes monthly); Uri surcharge = 0 if your bill has none; Taxes & Fees = your franchise fee or tax percentage.",
                 "data": {
                     "fixed_cost": "Customer Charge ($)",
-                    "usage_rate": "Consump Chrg Rate ($/CCF)",
+                    "usage_rate": "Consumption rate incl. per-CCF riders ($/CCF)",
                     "auto_fetch_gcr": "Auto-fetch current GCR rates",
-                    "gcr_rate": "Rider GCR Rate ($/CCF) (fallback)",
+                    "gcr_rate": "Gas cost (GCR) rate ($/CCF)",
                     "uri_surcharge": "Winter Storm Uri Surcharge ($/CCF)",
                     "tax_percent": "Taxes & Fees Percentage (%)"
                 }
@@ -88,12 +88,12 @@
             },
             "cost": {
                 "title": "Rates & Surcharges",
-                "description": "Update your billing rates and surcharges.",
+                "description": "Enter the rates from your latest Atmos Energy bill; daily costs are calculated from them. Defaults are Mid-Tex (Texas) rates. Other regions, e.g. Louisiana: Customer Charge = Monthly Customer Charge; Consumption rate = Consumption Charge plus any per-CCF riders such as Energy Efficiency; GCR rate = Gas Cost Charge (it changes monthly); Uri surcharge = 0 if your bill has none; Taxes & Fees = your franchise fee or tax percentage.",
                 "data": {
                     "fixed_cost": "Customer Charge ($)",
-                    "usage_rate": "Consump Chrg Rate ($/CCF)",
+                    "usage_rate": "Consumption rate incl. per-CCF riders ($/CCF)",
                     "auto_fetch_gcr": "Auto-fetch current GCR rates",
-                    "gcr_rate": "Rider GCR Rate ($/CCF) (fallback)",
+                    "gcr_rate": "Gas cost (GCR) rate ($/CCF)",
                     "uri_surcharge": "Winter Storm Uri Surcharge ($/CCF)",
                     "tax_percent": "Taxes & Fees Percentage (%)"
                 }

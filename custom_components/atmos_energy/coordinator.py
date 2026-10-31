@@ -944,7 +944,9 @@ class AtmosEnergyDataUpdateCoordinator(DataUpdateCoordinator):
             
             # 1. Daily usage specific tasks
             if daily_usage:
-                await self._update_gcr_rate()
+                if mode == MODE_DAILY_ADVANCED:
+                    # The fetched GCR is Mid-Tex's; other regions use the entered rate
+                    await self._update_gcr_rate()
                 # Past billing periods go to statistics and the model only;
                 # data["history"] stays the current period.
                 history = await self._async_add_past_periods(data.get("history", []))
